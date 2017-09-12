@@ -174,8 +174,8 @@ subroutine CC_solve_DIC_Talk( DIC, Talk, T, S,                            & ! IN
                                             HCO3, CO3, OH,                & ! OPTIONAL OUTPUT
                                             omega_cal, omega_arg, pH,     & ! OPTIONAL
                                             AB, AP, ASi,                  & ! OPTIONAL
-                                            const,                        & ! OPTIONAL
-                                            mask, K1_f )                    ! OPTIONAL INPUT
+                                            const,pCO2,                   & ! OPTIONAL
+                                            mask, K1_f, K2_f, pHi )          ! OPTIONAL INPUT
 ! - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 ! Attempt to solve the fifth order equation
 !
@@ -195,7 +195,9 @@ double precision, intent(in),optional  ::     &
                        TF,          & ! Total Fluoride              mol / kg-soln
                        TSi,         & ! Total Silicate              mol / kg-soln
                        TNH3,        & ! Total NH3                   mol / kg-sol
-                       K1_f           ! factor for equlibrium constant 1
+                       K1_f,        & ! factor for equlibrium constant 1, 
+                       K2_f,        &
+                       pHi             ! intial guess at pH
 logical,intent(in),optional ::mask    ! if false, exit
 integer,intent(in),optional :: const   ! which set of contsants to use
                                           
@@ -208,6 +210,7 @@ double precision, intent(out),optional ::     &
                          OH,        & ! OH conc                     mol / kg-soln 
                        omega_cal,   & ! Calcite   saturation state  1
                        omega_arg,   & ! Aragonite saturation state  1
+                       pCO2,        & 
                        pH             ! pH                          Hansson scale
 
 double precision, intent(out), optional :: &
@@ -233,7 +236,7 @@ double precision ::  &
           H_T,             & ! The Hanson H concentration
           SWS_2_T,         & ! Convert  _SWS to _T
           Free_2_T,        & ! Convert _Free to _T
-          K1_fin
+          K1_fin,K2_fin 
 
 integer :: n, i, &
            const_i
@@ -263,9 +266,11 @@ Free_2_T =  1. + TS_i/KS
 ! Get the equilibrium constants
 K1_fin =1.d0
 if( present(K1_f) ) K1_fin = K1_f
+K2_fin =1.d0
+if( present(K2_f) ) K2_fin = K2_f
 
-K1 = K1_H2CO3( T,S, const=const_i)/SWS_2_T  *K1_fin            ! pH_SWS -> pH_T
-K2 = K2_H2CO3( T,S, const=const_i)/SWS_2_T                     ! pH_SWS -> pH_T
+K1 = K1_H2CO3( T,S, const=const_i)*K1_fin!/SWS_2_T             ! pH_SWS -> pH_T
+K2 = K2_H2CO3( T,S, const=const_i)*K2_fin!/SWS_2_T             ! pH_SWS -> pH_T
      
 KW = K_W( T,S, const=const_i)                  ! pH_T
 KB = K_B( T,S )/SWS_2_T   
@@ -284,46 +289,62 @@ K1P = K1_P(T,S)!*SWS_2_T          ! pH_T
 K2P = K2_P(T,S)!*SWS_2_T          ! pH_T
 K3P = K3_P(T,S)!*SWS_2_T          ! pH_T
 
-KSi  = K_Si(T,S)                 ! pH_T
+KSi  = K_Si(T,S)!/SWS_2_T         ! pH_T
 TSi_i = 0.
 if( present(TSi)) TSi_i = TSi
 
+!write(19,*)"K1,K2",K1,K2
+!write(19,*)"KW",KW
+!write(19,*)"TB,KB",TB_i,KB
+!write(19,*)"TS,KS",TS_i,KS
+!write(19,*)"TF,KF",TF_i,KF
+!stop 1
 
-! find a rough range by bisection
-h0 = 14.0  
-h1 = 9.0   
-h2 = 1.0   
-do i = 1, 8
-   h1 = (h0+h2)/2.d0
-   f0 = obj( 10**(-h0) )
-   f1 = obj( 10**(-h1) )
-   f2 = obj( 10**(-h2) ) 
-   !write(19,*) " - - -"
-   !write(19,*)  h0, f0
-   !write(19,*)  h1, f1
-   !write(19,*)  h2, f2
+if(  present(pHi) )then
+   h1 = pHi
+else
+   ! find a rough range by bisection
+   h0 = 14.0  
+   h1 = 9.0   
+   h2 = 1.0   
+   do i = 1, 8
+      h1 = (h0+h2)/2.d0
+      f0 = obj( 10**(-h0) )
+      f1 = obj( 10**(-h1) )
+      f2 = obj( 10**(-h2) ) 
+      !write(19,*) " - - -"
+      !write(19,*)  h0, f0
+      !write(19,*)  h1, f1
+      !write(19,*)  h2, f2
 
-   if(      ( f0<0. .and. f1>0.  .and. f2>0. ) .or. &
-            ( f0>0. .and. f1<0.  .and. f2<0. ) )then
-       h2 = h1 
-    elseif( ( f0<0. .and. f1<0.  .and. f2>0. ) .or. &
-            ( f0>0. .and. f1>0.  .and. f2<0. ) )then
-       h0 = h1
-    else 
-       exit
-    endif
-enddo
+      if(      ( f0<0. .and. f1>0.  .and. f2>0. ) .or. &
+               ( f0>0. .and. f1<0.  .and. f2<0. ) )then
+          h2 = h1 
+       elseif( ( f0<0. .and. f1<0.  .and. f2>0. ) .or. &
+               ( f0>0. .and. f1>0.  .and. f2<0. ) )then
+          h0 = h1
+       else 
+          exit
+       endif
+   enddo
+endif
 
 !write(19,*),"#Newton"
+!write(19,*) "TS",T,S
+!write(19,*) K1,K2
+!write(19,*) free_2_T
+!write(19,*) KW
+!write(19,*) "H",10**(-h1)
+!write(19,*) "obj",h1,obj(10**(-h1)),Dobj(10**(-h1))
 h0 = h1
-do i = 1, 60
+do i = 1, 100
     f0 =  obj( 10**(-h0) ) 
    df0 = Dobj( 10**(-h0) ) * (-log(10.)*10**(-h0))
 
    h1  = h0 - f0/df0
 
    !write(19,*) ,i,h0,f0
-   if( abs(h1-h0)<1.d-5 ) exit
+   if( abs(f0)<1e-4 ) exit
    h0 = h1 
 enddo
 
@@ -336,7 +357,7 @@ APi  = +TP_i*(K1P*K2P*h+2*K1P*K2P*K3P-h**3)/(h**3+K1P*h**2+K1P*K2P*h+K1P*K2P*K3P
 ASii = TSi_i/(1+h/KSi)
 
 ! optional outputs
-if( present(pH)       ) pH        = -log10(H)
+if( present(pH)       ) pH        = h1
 if( present(HCO3)     ) HCO3      = DIC/(1.+H/K1 + K2/H)
 if( present( CO3)     ) CO3       = CO3i
 if( present(omega_cal)) omega_cal = T_Ca(S) * CO3i / Ksp_cal(T,S)
@@ -345,6 +366,8 @@ if( present(OH       )) OH  = KW/H
 if( present(AB       )) AB  = TB_i/(1.+H/KB)
 if( present(AP       )) AP  = APi
 if( present(ASi      )) ASi = ASii
+if( present(pCO2     )) pCO2 = CO2/K0_CO2(T,S) / CO2_fugacity_const(T)
+
 
 !checks for other equations
 HCO3i = CO3i * H / K2
@@ -354,30 +377,44 @@ return
 contains
 
 ! - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-pure function obj(h) result( y )
+function obj(h) result( y )
 ! - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 ! this is the objective function that we need to find the roots of
 double precision, intent(in) :: h
 double precision             :: y
+
+double precision :: h_free
 
 
 ! This is from page 277 of Zeebe
 !y =   DIC*( K1*h**2 +2.*K1*K2*h )*(KB+h)  &
 !    -( (KB+h)*(Talk*h-Kw+h**2) - KB*TBi*h )*(h**2+K1*h+K1*K2)  
 
-    
+! old
+!h_free=h/Free_2_T
+!
+! y =  DIC*(K1*H+2.*K1*K2)/(H*H+K1*h+K1*K2)   &
+!     - h_free + Kw/h                         &
+!     - Talk                                  &
+!    +TB_i  /(1.+h/KB)                        &
+!    +TP_i*(K1P*K2P*h+2*K1P*K2P*K3P-h**3)/(h**3+K1P*h**2+K1P*K2P*h+K1P*K2P*K3P)  &
+!    -TF_i /(1.d0+KF/h_free)                        &
+!    +TSi_i/(1.d0+h/Ksi)                       &
+!    -TS_i /(1.d0+KS*Free_2_T/h_free)              
+!
+!y = y*1d6
 
- y =  DIC*(K1*h+2*K1*K2)/(H**2+K1*h+K1*K2) &
-     +TB_i  /(1.+h/KB)                      &
-     - h/Free_2_T + Kw/h                   &
-     - Talk                            &
-     +TP_i*(K1P*K2P*h+2*K1P*K2P*K3P-h**3)/(h**3+K1P*h**2+K1P*K2P*h+K1P*K2P*K3P)  &
-     -TF_i /(1.d0+KF/h)                        &
-     +TSi_i/(1.d0+h/Ksi)                       &
-     -TS_i /(1.d0+KS*Free_2_T/h)              
+h_free = h/Free_2_T
+y =  DIC*(K1*h+2.*K1*K2)/(h*h+K1*h+K1*K2)   &
+    - h_free + KW/h                         &
+    - Talk                                  &
+   +TB_i  /(1.+h/KB)                          &
+   +TP_i*(K1P*K2P*h+2*K1P*K2P*K3P-h**3)/(h**3+K1P*h**2+K1P*K2P*h+K1P*K2P*K3P) &
+   -TF_i /(1.+KF/h_free)                      &
+   +TSi_i/(1.+h/KSi)                          &
+   -TS_i /(1.+KS/h_free)
 
 y = y*1d6
-
 
 return
 end function obj
@@ -389,13 +426,16 @@ pure function Dobj(h) result( dy )
 double precision, intent(in) ::  h
 double precision             :: dy
 
-! This is from page 277 of Zeebe
-dy =    DIC*( 2.*K1*h    +2.*K1*K2   )*(KB+h) &
-       +DIC*(    K1*h**2 +2.*K1*K2*h )        &
-       -( (KB+h)*(Talk  +2.*h   ) &
-               + (Talk*h-Kw+h**2) - KB*TB_i   )*(   h**2+K1*h+K1*K2)  &
-       -( (KB+h)*(Talk*h-Kw+h**2) - KB*TB_i*h )*(2.*h   +K1        )
+double precision :: h_free
 
+! This is from page 277 of Zeebe
+h_free = h/Free_2_T
+!dy =    DIC*( 2.*K1*h    +2.*K1*K2   )*(KB+h) &
+!       +DIC*(    K1*h**2 +2.*K1*K2*h )        &
+!       -( (KB+h)*(Talk  +2.*h   ) &
+!               + (Talk*h-Kw+h**2) - KB*TB_i   )*(   h**2+K1*h+K1*K2)  &
+!       -( (KB+h)*(Talk*h-Kw+h**2) - KB*TB_i*h )*(2.*h   +K1        )
+!
 
  dy =   DIC*(K1 +2*K1*K2)/(H**2+K1*h+K1*K2) &
        -DIC*(K1*h+2*K1*K2)/(H**2+K1*h+K1*K2)**2*(2*h+K1) &
@@ -404,9 +444,9 @@ dy =    DIC*( 2.*K1*h    +2.*K1*K2   )*(KB+h) &
        +TP_i*(K1P*K2P             -3.*h**2)/(h**3+K1P*h**2+K1P*K2P*h+K1P*K2P*K3P) &
        -TP_i*(K1P*K2P*h+2*K1P*K2P*K3P-h**3)/(h**3+K1P*h**2+K1P*K2P*h+K1P*K2P*K3P)**2 &
         *(3.*h**2+2.*K1P*h+K1P*K2P)    &
-       -TF_i  /(h+KF)**2 * KF    &
-       -TSi_i/(KSi+h/Ksi)**2      &
-       -TS_i  /(h+KS*Free_2_T)**2*KS*Free_2_T
+       -TF_i  /(1.+KF/h_free)**2 * KF*Free_2_T    &
+       +TSi_i /(1.+h /KSi   )**2 / KSi   &
+       -TS_i  /(1.+KS/h_free)**2*KS*Free_2_T
          
 
 dy = dy*1d6
@@ -1141,19 +1181,25 @@ double precision elemental function K_F( T, S )
 ! pH scale is Hansson, pH_T
 !
 double precision,intent(in) :: T, S
-double precision :: I, KS, TS
+double precision :: I, KS, TS, lnKF
 
 
-I  =     19.924*S      &
-     /(1000. - 1.005*S)
+!I  =     19.924*S      &
+!     /(1000. - 1.005*S)
+!
+!TS = T_S(S)
+!KS = K_S(T,S)
+!
+!K_F = 1590.2/T - 12.641 + 1.525*sqrt(I) 
+!                                   !  this term converts 
+!                                   !  'free' -> Hansson
+!K_F = exp(K_F) * (1.0 - 0.001005*S)* (1.+ TS/KS)
 
-TS = T_S(S)
-KS = K_S(T,S)
-
-K_F = 1590.2/T - 12.641 + 1.525*sqrt(I) 
-                                   !  this term converts 
-                                   !  'free' -> Hansson
-K_F = exp(K_F) * (1.0 - 0.001005*S)* (1.+ TS/KS)
+!  Perez,F.F. and Fraga, F., Marine Chemistry 21(2):161-168, 1987
+!S =10-40   T=9-33 oC
+lnKF = -874. / T - 0.111 * sqrt(S)+ 9.68
+lnKF = -lnKF
+K_F = exp(lnKF)
 
 return
 end function K_F
@@ -1184,7 +1230,7 @@ double precision elemental function K1_P( T, S )
 !
 double precision,intent(in) :: T, S
 
-K1_P = -4576.752/T +115.525 -18.453*log(T) &
+K1_P = -4576.752/T +115.54  -18.453*log(T) &
       +(-106.736/T+0.69171)*sqrt(S) + (-0.65643/T-0.01844)*S
 
 K1_P = exp(K1_P)
@@ -1203,8 +1249,8 @@ double precision elemental function K2_P( T, S )
 !
 double precision,intent(in) :: T, S
 
-K2_P = -8814.715/T + 172.0883 -27.927*log(T) &
-      +(-160.34/T+1.35661)*sqrt(S) + (0.37355/T-0.05778)*S
+K2_P = -8814.715/T + 172.1033 -27.927*log(T) &
+      +(-160.34/T+1.3566)*sqrt(S) + (0.37355/T-0.05778)*S
 
 K2_P = exp(K2_P)
 
@@ -1222,8 +1268,8 @@ double precision elemental function K3_P( T, S )
 !
 double precision,intent(in) :: T, S
 
-K3_P = -3070.75/T -18.141 + ( 17.27039/T + 2.81197 )*sqrt(S) &
-        + (-44.994846/T - 0.09984)*S
+K3_P = -3070.75/T -18.126 + ( 17.27039/T + 2.81197 )*sqrt(S) &
+        + (-44.99486/T - 0.09984)*S
 
 K3_P = exp(K3_P)
 
@@ -1247,7 +1293,8 @@ double precision :: I
 I  =     19.924*S      &
      /(1000. - 1.005*S)
 
-K_Si = -8904.2/T + 117.385 -19.334*log(T)                         &
+!K_Si = -8904.2/T + 117.385 -19.334*log(T)                         &
+K_Si = -8904.2/T + 117.4   -19.334*log(T)                         &   
        + ( 3.5913  - 458.79 /T )*sqrt(I) + ( 188.74/T - 1.5998)*I   &
        + ( 0.07871 - 12.1652/T )*I**2  
 
@@ -1277,20 +1324,24 @@ double precision elemental function K_W( T, S, const )
 double precision,intent(in) :: T,S
 integer,optional,intent(in) :: const
 
+
+double precision :: logT
 integer :: const_i
+
+logT=log(T)
 
 const_i = 10
 if( present(const) ) const_i = const
 
 select case( const_i )
 case(10)
-   K_W =  148.9802 - 13847.26/T  - 23.6521 * log(T)     &
-         +(118.67/T  - 5.977 + 1.0495*log(T))*sqrt(S) - 0.01615*S
+   K_W =  148.9802 - 13847.26/T  - 23.6521 * logT     &
+         +(118.67/T  - 5.977 + 1.0495*logT)*sqrt(S) - 0.01615*S
 
    K_W = exp(K_W)
 case( 8 )
-   K_W = 148.9802 - 13847.26 / T - 23.6521 * log(T)
-   K_W = Exp(K_W)
+   K_W = 148.9802 - 13847.26 / T - 23.6521 * logT
+   K_W = exp(K_W)
 end select
 return
 end function K_W
@@ -1306,12 +1357,17 @@ double precision elemental function K_B( T, S )
 !  pH scale is Hansson, pH_T
 double precision,intent(in) :: S, T
 
+double precision :: TS,TF,KS,KF
+
 K_B = ( -8966.90 - 2890.53*sqrt(S) - 77.942*S + 1.728*S*sqrt(S)   &
        -0.0996*S**2 ) / T                                         &
        +148.0248 + 137.1942*sqrt(S) + 1.62142*S                   &
        -(24.4344 + 25.085*sqrt(S) + 0.2474*S)*log(T)              &
       +0.053105*sqrt(S)*T
-K_B = exp( K_B )
+! Needed for converting from Hansson pH_T -> seawater pH_SWS
+TS = T_S( S ) ; KS = K_S(T,S)         ! pH_F 
+TF = T_F( S ) ; KF = K_F(T,S)         ! pH_T      
+K_B = exp( K_B )* (1. + TS/KS)/( 1. + TS/KS + TF/KF )
 return
 end function K_B
 
@@ -1330,8 +1386,11 @@ double precision            :: S_cl
 !bt  = 0.000232 * scl/10.811        ! 10.811 is the atomic weight of Boron
                                     ! factor = 1.18787E-5
       
-! From Zeebe p263, Correction from COSys.m matlab file
-T_B = 4.157E-4 * S / 35.d0   ! factor = 1.18857E-5
+!! From Zeebe p263, Correction from COSys.m matlab file
+!T_B = 4.157E-4 * S / 35.d0   ! factor = 1.18857E-5
+
+! Lee, Kim, Byrne, Millero, Feely, Yong-Ming Liu. 2010.  Geochimica Et Cosmochimica Acta 74 (6)
+T_B = 0.0004326 * S / 35
 
 return
 end function T_B
