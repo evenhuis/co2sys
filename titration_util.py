@@ -150,7 +150,8 @@ def calc_curve_arr( theta, data, aux ):
     
     '''
     # uppack the data
-    TP,TSi,TNH3,THS2 = 0
+    TP =0; TSi=0; TNH3=0; TH2S=0
+    P = 0
     a_pH,b_pH, K1_f,K2_f = theta[0:4]
     DIC, TA              = theta[4:6]*1e-3      # from mM to M
 
@@ -164,13 +165,14 @@ def calc_curve_arr( theta, data, aux ):
     for i in reversed(range(no)):
         vol= data[0,i]
         TK = data[2,i]+273.15
+        T =  data[2,i]
         mass_a      =   vol*rho_a
         DIC_i       =    mass_s*DIC                 /(mass_s + mass_a )
         TA_i        =  ( mass_s*TA - mass_a*conc_a )/(mass_s + mass_a )
         S_i         =  ( mass_s*S  + mass_a*0.     )/(mass_s + mass_a )
         #pHs[i],outp = co2sys.CC_solve( DIC_i, TA_i, TK, S_i, const=10, K1_f=K1_f, K2_f=K2_f, pHi=pH0)
         #pHs[i] = co2sys.CC_solve_pH( DIC_i, TA_i, TK, S_i, const=const, TP=36.e-6,TSi=0.,TB=None,TS=None,TF=None,K1_f=K1_f, K2_f=K2_f, pHi=pH0)
-        pHs[i] = coc2sys.CC_solve_pH_arr( S,TK,P, TP,TSi,TNH3,TH2S, TA,DIC, const,K1_f,K2_f, pH0 )
+        pHs[i] = co2sys.CC_solve_pH_arr( S_i,TK,P, TP,TSi,TNH3,TH2S, TA_i,DIC_i, const,K1_f,K2_f, pH0 )
         pH0         = pHs[i]
     pHs  = a_pH*(pHs - 7.)+7. + b_pH
     return pHs
@@ -181,7 +183,7 @@ def log_like( theta, data, *args ):
     sg2  = theta[-1]
     pHo  = data[1]
 
-    pHc  = calc_curve(theta,data, *args)
+    pHc  = calc_curve_arr(theta,data, *args)
     #pHc   = cc.calc_curve( theta,data,args)
     return sum(stats.norm.logpdf( pHo-pHc, scale=sg2 ))
 
@@ -208,7 +210,7 @@ def log_like_m( theta, vol_data, aux_data ):
         theta_i = unpack_theta( theta, i )
         vdata   = vol_data[:,vol_data[4]==i]
         pHo     = vdata[1]
-        pHc     = calc_curve( theta_i, vdata, adata )
+        pHc     = calc_curve_arr( theta_i, vdata, adata )
         #pHc  = cc.calc_curve( theta_i, vdata, adata )
         ll += sum(stats.norm.logpdf( pHo-pHc, scale=sg2 ))
     return ll
@@ -275,7 +277,7 @@ def plot_fit( vol_data, aux_data, theta=None, xaxis="vol" ):
         if( theta is not None ):
             theta_i = unpack_theta( theta, i )
             #pH_m = cc.calc_curve( theta_i, vol, [mass_s, conc_a, S] )
-            pH_m  = calc_curve(theta_i,vol, aux )
+            pH_m  = calc_curve_arr(theta_i,vol, aux )
             plt.plot( vol[0]*xfact, pH_m,'-',color=c )
     plt.show()
     return
