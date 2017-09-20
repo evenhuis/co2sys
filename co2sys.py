@@ -23,6 +23,47 @@ def T_F( S) :
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     return 0.000067 * S / 18.9984 / 1.80655
 
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+def K0_CO2( T, S ):
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# T in Kelvin
+# Equlibrium constant for CO2 solubilty in water, Henry's Law
+#  sol       gas
+#
+# [CO2] = K0 fCO2
+#
+# fCO2 : fugacity, or approx. the partial pressure of CO2
+# Zeebe eq A.3.6 pg 256
+# K0 from Weiss 1974
+#
+# the units are
+#   CO2 : mol / kg_soln
+#  fCO2 : atm
+
+    K0_CO2 = 9345.17/T - 60.2409 + 23.3585*np.log(T/100.)    \
+              + S*( 0.023517 - 0.00023656*T + 0.0047036*(T/100.)**2 )
+    K0_CO2 = np.exp( K0_CO2 )
+    return K0_CO2
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+def CO2_fugacity_const( T ):
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+#     fCO2 = fugacity_const * pCOS
+#
+# from Zeebe p 65
+    p=101325.    # pressure in Pa, 1atm = 101325Pa
+    R=8.314      # Gas constant
+
+    B = (-1636.75 + 12.0408*T - 3.27957e-2*T**2 \
+         +3.16528e-5*T**3 )   * 1.e-6
+    delta = ( 57.7 - 0.118*T) * 1.e-6
+    c = np.exp( p*(B+2.*delta)/(R*T ) )
+
+    return c
+
+
+
+
 @numba.jit("f8(f8,f8,i4)",nopython=True)
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def K1_H2CO3( T, S, const=10 ):
@@ -171,8 +212,156 @@ def K_B( T, S ) :
     K_B = np.exp( K_B ) * (1. + TS/KS)/( 1. + TS/KS + TF/KF )
     return K_B
 
+@numba.jit("f8(   f8,f8,f8, f8,f8,f8,f8,     f8,f8,   i4,f8,f8, f8)", nopython=True)
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+def CC_solve_pH_arr( S,T,P, TP,TSi,TNH3,TH2S, TA,DIC, const,K1_f,K2_f, pHi):
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    #! Needed for converting from Hansson pH_T -> seawater pH_SWS
+    TS = T_S( S ) ; KS = K_S(T,S)         # pH_F 
+    TF = T_F( S ) ; KF = K_F(T,S)         # pH_T
 
-@numba.jit("f8(  f8,  f8, f8,f8, i4,    optional(f8), optional(f8), optional(f8),optional(f8),optional(f8),f8,f8,optional(f8))",nopython=True)
+    SWS_2_T  = (1. + TS/KS)/( 1. + TS/KS + TF/KF )
+    Free_2_T =  1. + TS/KS
+
+    KW = K_W( T,S)                # pH_T
+    KB = K_B( T,S )/SWS_2_T
+    TB = T_B(S)
+
+    K1 = K1_H2CO3( T,S, const=const) *K1_f#/ SWS_2_T
+    K2 = K2_H2CO3( T,S, const=const) *K2_f#/ SWS_2_T
+
+    K1P = K1_P(T,S)#/SWS_2_T
+    K2P = K2_P(T,S)#/SWS_2_T
+    K3P = K3_P(T,S)#/SWS_2_T
+    KSi = K_Si(T,S)#/SWS_2_T
+
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    def obj( pH ):
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        h = 10**(-pH)
+        h_free = h/Free_2_T
+        y =  DIC*(K1*h+2.*K1*K2)/(h*h+K1*h+K1*K2)   \
+            - h_free + KW/h                         \
+            - TA                                    \
+           +TB  /(1.+h/KB)                          \
+           +TP*(K1P*K2P*h+2*K1P*K2P*K3P-h**3)/(h**3+K1P*h**2+K1P*K2P*h+K1P*K2P*K3P) \
+           -TF /(1.+KF/h_free)                       \
+           +TSi/(1.+h/KSi)                          \
+           -TS /(1.+KS/h_free)
+        y = y*1e6
+        return y
+
+    #@numba.jit("f8(f8)",nopython=True)
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    def Dobj( pH ):
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        h = 10**(-pH)
+        dy =   DIC*(K1 +2*K1*K2)/(h**2+K1*h+K1*K2) \
+           -DIC*(K1*h+2*K1*K2)/(h**2+K1*h+K1*K2)**2*(2*h+K1) \
+           -TB *1./(1+h/KB)**2 / KB                         \
+           -KW/h**2 - 1./Free_2_T                         \
+           +TP*(K1P*K2P             -3.*h**2)/(h**3+K1P*h**2+K1P*K2P*h+K1P*K2P*K3P) \
+           -TP*(K1P*K2P*h+2*K1P*K2P*K3P-h**3)/(h**3+K1P*h**2+K1P*K2P*h+K1P*K2P*K3P)**2\
+              *(3.*h**2+2.*K1P*h+K1P*K2P) \
+           -TF  /(h+KF)**2 * KF    \
+           +TSi /(KSi+h/KSi)**2      \
+           -TS  /(h+KS*Free_2_T)**2*KS*Free_2_T    
+        dy =dy*1e6  * (-np.log(10.)*10**(-pH))
+        return dy
+
+    #if( pHi is None ):
+    if( True ):
+       # find a rough range by bisection
+       h0 = 12.0
+       h1 = 7.0
+       h2 = 3.0
+       for i in range(10):
+          h1 = (h0+h2)/2.0
+          f0 = obj(h0)
+          f1 = obj(h1)
+          f2 = obj(h2)
+          if(      ( f0<0. and f1>0.  and f2>0. ) or \
+                   ( f0>0. and f1<0.  and f2<0. ) ):
+              h2 = h1
+          elif( ( f0<0. and f1<0.  and f2>0. ) or \
+                ( f0>0. and f1>0.  and f2<0. ) ):
+              h0 = h1
+          else:
+              break
+       pH0=h1
+    else:
+       pH0=pHi
+
+#   from scipy.optimize import newton
+#   pH_opt=newton( obj,pH0,              tol=1e-6 )
+#   pH_opt=newton( obj,pH0,fprime=Dobj,  tol=1e-6 )
+#   pH0 = pH_opt
+    for i in range(100):
+       f0  =  obj( pH0 )
+       df0 = Dobj( pH0 )
+ 
+       pH1  = pH0 - f0/df0
+ 
+       if( (abs(f0)<1e-8) and (abs(pH0-pH1)<0.01 )): break
+       pH0 = pH1
+
+    return pH0
+
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+def CO2sys( data_in, const ):
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    nd,nr = np.shape(data_in)
+
+    names=('pH','fCO2','pCO2','HCO3','CO3','CO2','BA','OH','PA','ASi','ANH3','AHS2',
+                              'H3PO4','H2PO4','HPO4','PO4')
+    outp= np.zeros( nd, dtype={'names':names,'formats':tuple('f8' for i in range(len(names)))} )
+
+    pH0=7.
+    for i,data in enumerate(data_in):
+        S  = data[0]
+        TK = data[1]+273.15
+        P  = data[2]
+        TP,TSi,TNH3,TH2S, TA,DIC = data[3:9]*1e-6
+
+        pH = CC_solve_pH_arr( S,TK,P, TP,TSi,TNH3,TH2S, TA,DIC, const,1.,1.,pH0 )
+        pH0=pH
+      
+        TS = T_S( S ) ; KS = K_S(TK,S)         # pH_F 
+        TF = T_F( S ) ; KF = K_F(TK,S)         # pH_T
+        SWS_2_T  = (1. + TS/KS)/( 1. + TS/KS + TF/KF )
+        Free_2_T =  1. + TS/KS
+        K1 = K1_H2CO3( TK,S, const=const)
+        K2 = K2_H2CO3( TK,S, const=const)
+        KW = K_W( TK,S)                # pH_T
+        KB = K_B( TK,S )/SWS_2_T
+        TB = T_B(S)
+        K1P = K1_P(TK,S)#/SWS_2_T
+        K2P = K2_P(TK,S)#/SWS_2_T
+        K3P = K3_P(TK,S)#/SWS_2_T
+        KSi = K_Si(TK,S)#/SWS_2_T
+
+        TP,TSi,TNH3,TH2S, TA,DIC = data[3:9]
+        outp['pH'][i]=pH
+        H  = 10**(-pH)
+        H2 = H*H
+        H3 = H2*H 
+
+        denom = (H2+K1*H+K1*K2)
+        CO2 = DIC*H2      /denom
+        outp[  'CO2'][i] = CO2
+        outp[ 'HCO3'][i] = DIC*H *K1   /denom
+        outp[  'CO3'][i] = DIC   *K1*K2/denom
+        outp[   'OH'][i] = KW/H
+
+        denom = H3 + K1P*H2 + K1P*K2P*H + K1P*K2P*K3P
+        outp['H3PO4'][i] = TP/denom*H3     
+        outp['H2PO4'][i] = TP/denom*H2*K1P
+        outp[ 'HPO4'][i] = TP/denom*H *K1P*K2P
+        outp[  'PO4'][i] = TP/denom   *K1P*K2P*K3P
+    return outp
+
+
+@numba.jit("f8(  f8,  f8, f8,f8, i4,    optional(f8), optional(f8), optional(f8),optional(f8),optional(f8),f8,f8,optional(f8))")
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def CC_solve_pH( DIC, TA, T,S, const=10, TP=0., TSi=0, TB=None, TS=None, TF=None, \
               K1_f=1.0, K2_f=1.0, pHi=None ):
@@ -374,10 +563,13 @@ def CC_solve( DIC, TA, T,S, const=10, TP=0., TSi=0, TB=None, TS=None, TF=None,  
 
     outp={}
     denom = (H2+K1*H+K1*K2)
-    outp[  'CO2'] = DIC*H2      /denom
+    CO2 = DIC*H2      /denom
+    outp[  'CO2'] = CO2
     outp[ 'HCO3'] = DIC*H *K1   /denom
     outp[  'CO3'] = DIC   *K1*K2/denom
     outp[   'OH'] = KW/H
+
+    outp['pCO2'] = CO2/K0_CO2(T,S) / CO2_fugacity_const(T)
 
     denom = ( H3 + K1P*H2+ H*K1P*K2P+K1P*K2P*K3P )
     outp['H3PO4'] = TP*H3            /denom

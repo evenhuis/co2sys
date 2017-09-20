@@ -3,7 +3,10 @@ import sys
 import numpy as np
 import os
 
-import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("TkAgg")
+from matplotlib import pyplot as plt
+
 import scipy.stats as stats
 import scipy.optimize as op
 import glob
@@ -61,14 +64,29 @@ def get_data_from_file( filename):
     return mass_s, conc_a,np.array([vol,pH,temp,time],dtype=float)
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-def calc_curve( theta, data, mass_s, conc_a, S ):
+def calc_curve( theta, data, *args ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    ''' simulate the pH for a titration 
+        theta :
+            pH slope correcrtion 
+            pH  offset
+            K1_f, K2_f multiplicative correction for equlibirum coefficents
+        data  :
+            [:,0]     vol of acid in mL
+            [:,2]     Temperatiuree in deg C
+        args
+            optional arguements
+    
+    '''
+    mass_s, conc_a, S = args
+   
     K1_f=1. ;  K2_f=1.
 
     a_pH,b_pH, K1_f, K2_f = theta[0:4]
     nt = len(theta)
     DIC, TA =theta[4:6]*1e-3            # from mM to M
     nd,no = np.shape(data)
+
     pH0=3.8 # initial guess at pH, low as beyond endpoint at 4.5
     pHs = np.zeros(no)
     for i in reversed(range(no)):
@@ -272,13 +290,28 @@ def report_chain( chain, filenames):
         print(fstr.format(fname[15:-4],*perc))
     return
 
-report_chain( chain, filenames)
-sdfjk
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+def get_directory():
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -    
+    from tkinter import Tk
+    from tkinter import filedialog
+    import os
+
+    root = Tk()
+    root.update()
+    root.withdraw()
+
+    current_directory = filedialog.askdirectory()
+    root.update()
+    return current_directory
 
 #script, filename = sys.argv
 f = open('theta_new.txt', 'w')
 
-filenames=glob.glob("../*/PC*.txt")[0:]
+#cdir = get_directory()
+cdir="/Volumes/c3_share/BIOSYSTEMS/Oksana/Time_series/alk_DIC_calcs/"
+filenames=glob.glob(cdir+'/PC*.txt')[0:]
+#filenames=glob.glob("../*/PC*.txt")[0:]
           
 nf=len(filenames)
 aux_data = np.zeros([nf,3])

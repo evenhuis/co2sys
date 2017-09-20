@@ -247,11 +247,19 @@ def nll( theta, *args ):
     return -log_like_m( theta, *args)
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-def plot_fit( vol_data, aux_data, theta=None ):
+def plot_fit( vol_data, aux_data, theta=None, xaxis="vol" ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     fig,ax = plt.subplots(1,1)
     ncurve = np.shape(aux_data)[0]
     colormap = plt.cm.gist_ncar
+
+    if( xaxis == "vol"):
+        xfact = 1.0
+        ax.set_xlabel("Vol acid (mL)")
+    elif( xaxis=="alk"):
+        ax.set_xlabel(r'Alkalinity ($\mu$M)')
+    ax.set_ylabel("pH")
+
 
     color=iter(plt.cm.rainbow(np.linspace(0,1,ncurve)))
     for i,aux in enumerate(aux_data):
@@ -259,12 +267,16 @@ def plot_fit( vol_data, aux_data, theta=None ):
         # select this run's data
         vol = vol_data[:,vol_data[4]==i]
         mass_s, conc_a = aux[0:2]
-        plt.plot( vol[0]/mass_s*conc_a*1e6, vol[1],'o',color=c)
+        if( xaxis == "alk"):
+            xfact=conc_a/mass_s*1e6
+
+        plt.plot( vol[0]*xfact, vol[1],'o',color=c)
+
         if( theta is not None ):
             theta_i = unpack_theta( theta, i )
             #pH_m = cc.calc_curve( theta_i, vol, [mass_s, conc_a, S] )
             pH_m  = calc_curve(theta_i,vol, aux )
-            plt.plot( vol[0]/mass_s*conc_a*1e6, pH_m,'-',color=c )
+            plt.plot( vol[0]*xfact, pH_m,'-',color=c )
     plt.show()
     return
 
