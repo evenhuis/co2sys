@@ -25,11 +25,12 @@ for const,filen in zip( consts, files) :
     for j,res in enumerate(co2_xls):
         T,S,DIC,TA, TP,TSi= list(map(float,res[[1,0,6,5, 3,4]]))
         #print("T=",T,"S=",S)
-        pH,outp = co2sys.CC_solve( DIC*1e-6,TA*1e-6, T+273.15,S, TP=TP*1e-6, TSi=TSi*1e-6, const=const )
+        pH,outp = co2sys.CC_solve( DIC*1e-6,TA*1e-6, T+273.15,S, TP=TP*1e-6, TSi=TSi*1e-6, const=const, scale='tot' )
         co2_lib[j,[0,1, 7 ]]=[S,T, pH ]
         co2_lib[j,[6,5]] = [ DIC,TA ] 
         co2_lib[j,[  10,11,12,14,15,16]] = [              outp['HCO3'], outp['CO3'],outp['CO2'],outp['OH'],outp['AP'],outp['ASi']]
         co2_lib[j,5:7] = co2_lib[j,5:7]
+        co2_lib[j,9  ] = outp['pCO2']*1.e6
         co2_lib[j,10:] = co2_lib[j,10:]*1e6
 
         outp = cc.py_interface_mod.cc_solve( [ DIC*1e-6,TA*1e-6, T+273.15,S,TP*1e-6,TSi*1e-6 ],const )
@@ -65,4 +66,3 @@ for const,filen in zip( consts, files) :
             ax.plot( 1.0+plc, co2_fort[:,k]-co2_xls[:,k], 'o',color=cols[1])
             ax.plot( 1.1+plc, co2_fort[:,k]-co2_lib[:,k], 'o',color=cols[2])
     plt.show()
-    sdfjk

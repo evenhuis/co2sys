@@ -63,7 +63,6 @@ def CO2_fugacity_const( T ):
 
 
 
-
 @numba.jit("f8(f8,f8,i4)",nopython=True)
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def K1_H2CO3( T, S, const=10 ):
@@ -145,6 +144,28 @@ def K_F( T, S ):
 
 @numba.jit("f8(f8,f8)",nopython=True)
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+def K_NH3( T, S ):
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    PKNH4expCW = 9.244605 - 2729.33 * (1. / 298.15 - 1. / T)
+    PKNH4expCW = PKNH4expCW + (0.04203362 - 11.24742 / T) * S**0.25
+    PKNH4expCW = PKNH4expCW + (-13.6416 + 1.176949 * T**0.5 - 0.02860785 * T + 545.4834 / T) * S ** 0.5
+    PKNH4expCW = PKNH4expCW + (-0.1462507 + 0.0090226468 * T ** 0.5 - 0.0001471361 * T + 10.5425 / T) * S ** 1.5
+    PKNH4expCW = PKNH4expCW + (0.004669309 - 0.0001691742 * T ** 0.5 - 0.5677934 / T) * S ** 2
+    PKNH4expCW = PKNH4expCW + (-2.354039E-05 + 0.009698623 / T) * S ** 2.5
+    KNH4 = 10.**(-PKNH4expCW) # this is on the total pH scale in mol/kg-H2O
+    KNH4 = KNH4 * (1. - 0.001005 * S) # convert to mol/kg-SW
+    return KNH4
+
+@numba.jit("f8(f8,f8)",nopython=True)
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+def K_H2S( T,S ):
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    lnKH2S = 225.838 - 13275.3/T - 34.6435*np.log(T)+ 0.3449*np.sqrt(S) - 0.0274*S
+    KH2S   = np.exp(lnKH2S)
+    return KH2S
+
+@numba.jit("f8(f8,f8)",nopython=True)
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def K1_P( T, S ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     K1_P = -4576.752/T +115.525 -18.453*np.log(T) \
@@ -212,9 +233,9 @@ def K_B( T, S ) :
     K_B = np.exp( K_B ) * (1. + TS/KS)/( 1. + TS/KS + TF/KF )
     return K_B
 
-@numba.jit("f8(   f8,f8,f8, f8,f8,f8,f8,     f8,f8,   i4,f8,f8, f8)", nopython=True)
+@numba.jit("f8(   f8,f8,f8, f8,f8,f8,f8,     f8,f8,   i4,f8,f8,    i4,i4)", nopython=True)
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-def CC_solve_pH_arr( S,T,P, TP,TSi,TNH3,TH2S, TA,DIC, const,K1_f,K2_f, pHi):
+def CC_solve_pH_arr( S,T,P, TP,TSi,TNH3,TH2S, TA,DIC, const,K1_f,K2_f, pHi,scale):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     #! Needed for converting from Hansson pH_T -> seawater pH_SWS
     TS = T_S( S ) ; KS = K_S(T,S)         # pH_F 
@@ -235,6 +256,9 @@ def CC_solve_pH_arr( S,T,P, TP,TSi,TNH3,TH2S, TA,DIC, const,K1_f,K2_f, pHi):
     K3P = K3_P(T,S)#/SWS_2_T
     KSi = K_Si(T,S)#/SWS_2_T
 
+    KNH3 = K_NH3(T,S)
+    KH2S = K_H2S(T,S)
+
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     def obj( pH ):
     # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -245,8 +269,10 @@ def CC_solve_pH_arr( S,T,P, TP,TSi,TNH3,TH2S, TA,DIC, const,K1_f,K2_f, pHi):
             - TA                                    \
            +TB  /(1.+h/KB)                          \
            +TP*(K1P*K2P*h+2*K1P*K2P*K3P-h**3)/(h**3+K1P*h**2+K1P*K2P*h+K1P*K2P*K3P) \
-           -TF /(1.+KF/h_free)                       \
+           -TF /(1.+KF/h_free)                      \
            +TSi/(1.+h/KSi)                          \
+           +TNH3/(1.+h/KNH3)                         \
+           +TH2S /(1.+h/KH2S)                       \
            -TS /(1.+KS/h_free)
         y = y*1e6
         return y
@@ -264,7 +290,9 @@ def CC_solve_pH_arr( S,T,P, TP,TSi,TNH3,TH2S, TA,DIC, const,K1_f,K2_f, pHi):
            -TP*(K1P*K2P*h+2*K1P*K2P*K3P-h**3)/(h**3+K1P*h**2+K1P*K2P*h+K1P*K2P*K3P)**2\
               *(3.*h**2+2.*K1P*h+K1P*K2P) \
            -TF  /(h+KF)**2 * KF    \
-           +TSi /(KSi+h/KSi)**2      \
+           -TSi *KSi /(KSi +h)**2      \
+           -TNH3*KNH3/(KNH3+h)**2   \
+           -TH2S*KH2S/(KH2S+h)**2   \
            -TS  /(h+KS*Free_2_T)**2*KS*Free_2_T    
         dy =dy*1e6  * (-np.log(10.)*10**(-pH))
         return dy
@@ -305,16 +333,21 @@ def CC_solve_pH_arr( S,T,P, TP,TSi,TNH3,TH2S, TA,DIC, const,K1_f,K2_f, pHi):
        if( (abs(f0)<1e-8) and (abs(pH0-pH1)<0.01 )): break
        pH0 = pH1
 
+    if( scale==1): pH0=pH0 +np.log10( Free_2_T)
+
     return pH0
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-def CO2sys( data_in, const ):
+def CO2sys( data_in, const, scale='tot', K1_f=1.0, K2_f=1.0 ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     nd,nr = np.shape(data_in)
 
-    names=('pH','fCO2','pCO2','HCO3','CO3','CO2','BA','OH','PA','ASi','ANH3','AHS2',
-                              'H3PO4','H2PO4','HPO4','PO4')
+    names=('pH','fCO2','pCO2','HCO3','CO3','CO2','AB','OH','AP','ASi','ANH3','AHS2',
+                              'H3PO4','H2PO4','HPO4','PO4', 'NH4','NH3','SiO(OH)3')
     outp= np.zeros( nd, dtype={'names':names,'formats':tuple('f8' for i in range(len(names)))} )
+
+    scalei=0
+    if( scale in ['tot',0] ): scalei=0
 
     pH0=7.
     for i,data in enumerate(data_in):
@@ -323,15 +356,15 @@ def CO2sys( data_in, const ):
         P  = data[2]
         TP,TSi,TNH3,TH2S, TA,DIC = data[3:9]*1e-6
 
-        pH = CC_solve_pH_arr( S,TK,P, TP,TSi,TNH3,TH2S, TA,DIC, const,1.,1.,pH0 )
+        pH = CC_solve_pH_arr( S,TK,P, TP,TSi,TNH3,TH2S, TA,DIC, const,K1_f,K2_f,pH0, 0 )
         pH0=pH
       
         TS = T_S( S ) ; KS = K_S(TK,S)         # pH_F 
         TF = T_F( S ) ; KF = K_F(TK,S)         # pH_T
         SWS_2_T  = (1. + TS/KS)/( 1. + TS/KS + TF/KF )
         Free_2_T =  1. + TS/KS
-        K1 = K1_H2CO3( TK,S, const=const)
-        K2 = K2_H2CO3( TK,S, const=const)
+        K1 = K1_H2CO3( TK,S, const=const)*K1_f
+        K2 = K2_H2CO3( TK,S, const=const)*K2_f
         KW = K_W( TK,S)                # pH_T
         KB = K_B( TK,S )/SWS_2_T
         TB = T_B(S)
@@ -340,8 +373,11 @@ def CO2sys( data_in, const ):
         K3P = K3_P(TK,S)#/SWS_2_T
         KSi = K_Si(TK,S)#/SWS_2_T
 
+        KNH3= K_NH3(TK,S)
+
         TP,TSi,TNH3,TH2S, TA,DIC = data[3:9]
         outp['pH'][i]=pH
+        if( scale=='free'): outp['pH'][i]=pH +np.log10( Free_2_T)
         H  = 10**(-pH)
         H2 = H*H
         H3 = H2*H 
@@ -353,18 +389,30 @@ def CO2sys( data_in, const ):
         outp[  'CO3'][i] = DIC   *K1*K2/denom
         outp[   'OH'][i] = KW/H
 
+        outp['pCO2'][i] = CO2 / K0_CO2(TK,S) / CO2_fugacity_const(TK)
+
         denom = H3 + K1P*H2 + K1P*K2P*H + K1P*K2P*K3P
         outp['H3PO4'][i] = TP/denom*H3     
         outp['H2PO4'][i] = TP/denom*H2*K1P
         outp[ 'HPO4'][i] = TP/denom*H *K1P*K2P
         outp[  'PO4'][i] = TP/denom   *K1P*K2P*K3P
+        outp[   'AP'][i] = +outp[ 'HPO4'][i] + 2*outp[  'PO4'][i] -outp['H3PO4'][i]
+
+        denom = (1.+H/KSi)
+        outp['SiO(OH)3'][i]   = TSi/denom
+        outp['ASi']     [i]   = TSi/denom
+
+        denom = (KNH3+H)
+        outp[ 'NH3'][i] = TNH3/denom *KNH3
+        outp[ 'NH4'][i] = TNH3/denom * H
+        outp['ANH3'][i] = outp[ 'NH3'][i]
     return outp
 
 
-@numba.jit("f8(  f8,  f8, f8,f8, i4,    optional(f8), optional(f8), optional(f8),optional(f8),optional(f8),f8,f8,optional(f8))")
+@numba.jit("f8(  f8,  f8, f8,f8, i4,    optional(f8), optional(f8), optional(f8),optional(f8),optional(f8),f8,f8,optional(f8),optional(i4))")
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def CC_solve_pH( DIC, TA, T,S, const=10, TP=0., TSi=0, TB=None, TS=None, TF=None, \
-              K1_f=1.0, K2_f=1.0, pHi=None ):
+              K1_f=1.0, K2_f=1.0, pHi=None, scale=0 ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     #! Needed for converting from Hansson pH_T -> seawater pH_SWS
     TS = T_S( S ) ; KS = K_S(T,S)         # pH_F 
@@ -462,7 +510,7 @@ def CC_solve_pH( DIC, TA, T,S, const=10, TP=0., TSi=0, TB=None, TS=None, TF=None
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 def CC_solve( DIC, TA, T,S, const=10, TP=0., TSi=0, TB=None, TS=None, TF=None,  \
-              K1_f=1.0, K2_f=1.0, pHi=None ):
+              K1_f=1.0, K2_f=1.0, pHi=None, scale=0 ):
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     #! Needed for converting from Hansson pH_T -> seawater pH_SWS
     TS = T_S( S ) ; KS = K_S(T,S)         # pH_F 
@@ -570,6 +618,11 @@ def CC_solve( DIC, TA, T,S, const=10, TP=0., TSi=0, TB=None, TS=None, TF=None,  
     outp[   'OH'] = KW/H
 
     outp['pCO2'] = CO2/K0_CO2(T,S) / CO2_fugacity_const(T)
+    #print("pCO2",outp['pCO2'] )
+    #print("CO2",CO2)
+    #print("K0", K0_CO2(T,S))
+    #print("CO2_fug",CO2_fugacity_const(T))
+    #sdfjk    
 
     denom = ( H3 + K1P*H2+ H*K1P*K2P+K1P*K2P*K3P )
     outp['H3PO4'] = TP*H3            /denom
@@ -579,5 +632,6 @@ def CC_solve( DIC, TA, T,S, const=10, TP=0., TSi=0, TB=None, TS=None, TF=None,  
     outp[   'AP'] = outp['HPO4'] +2*outp['PO4'] -outp['H3PO4']
 
     outp[  'ASi'] = TSi*KSi/(KSi+H)
+    if( scale=='free' ) : pH0 = pH0/free_2_T
 
     return pH0,outp

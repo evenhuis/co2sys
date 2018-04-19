@@ -366,7 +366,9 @@ if( present(OH       )) OH  = KW/H
 if( present(AB       )) AB  = TB_i/(1.+H/KB)
 if( present(AP       )) AP  = APi
 if( present(ASi      )) ASi = ASii
-if( present(pCO2     )) pCO2 = CO2/K0_CO2(T,S) / CO2_fugacity_const(T)
+if( present(pCO2     ))then
+   pCO2 = CO2/K0_CO2(T,S) / CO2_fugacity_const(T)
+endif
 
 
 !checks for other equations
