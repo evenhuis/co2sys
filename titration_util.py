@@ -335,12 +335,12 @@ def plot_DIC_Alk( chain, filenames=None ):
         t = rel_times[i]
         ii=4+2*i
         percs=np.percentile( chain[:,:,ii].flatten(), [2.5,25,50,75,97.5])*1000
-        plt.errorbar( t, percs[2], yerr=[[percs[2]-percs[1]],[percs[3]-percs[2]]], capsize=0,lw=4, color="red" )
-        plt.errorbar( t, percs[2], yerr=[[percs[2]-percs[0]],[percs[4]-percs[2]]], capsize=0,lw=2, color="red" )
+        plt.errorbar( t, percs[2], yerr=[[percs[2]-percs[1]],[percs[3]-percs[2]]], capsize=0,lw=8, color="red" )
+        plt.errorbar( t, percs[2], yerr=[[percs[2]-percs[0]],[percs[4]-percs[2]]], capsize=0,lw=4, color="red" )
        
         percs=np.percentile( chain[:,:,ii+1].flatten(), [2.5,25,50,75,97.5])*1000
-        plt.errorbar( t, percs[2], yerr=[[percs[2]-percs[1]],[percs[3]-percs[2]]], capsize=0,lw=4, color="blue" )
-        plt.errorbar( t, percs[2], yerr=[[percs[2]-percs[0]],[percs[4]-percs[2]]], capsize=0,lw=2, color="blue" )
+        plt.errorbar( t, percs[2], yerr=[[percs[2]-percs[1]],[percs[3]-percs[2]]], capsize=0,lw=8, color="blue" )
+        plt.errorbar( t, percs[2], yerr=[[percs[2]-percs[0]],[percs[4]-percs[2]]], capsize=0,lw=4, color="blue" )
     plt.axhline(1780.,ls='--',color='red')
     plt.xlabel("Time (hours)")
     plt.ylabel(r'Concentraion ($\mu  M$)')
